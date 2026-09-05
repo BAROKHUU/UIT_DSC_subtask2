@@ -179,4 +179,5 @@ def build_final_answer(
         if intro_generator is not None
         else deterministic_intro(question, evidence)
     )
-    return "\n".join([intro, *paragraphs])
+    evidence_lines = [f"- {text}" for text in paragraphs]
+    return "\n".join([intro, *evidence_lines])

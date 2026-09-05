@@ -371,6 +371,16 @@ python scripts/infer.py \
 
 ## 10. Public test inference
 
+On Windows PowerShell, the simplest resumable command is:
+
+```powershell
+.\create_submission.ps1
+```
+
+It writes `data/submission.json`, checkpoints every 10 new answers, and resumes
+from that file after an interruption. Use `-Fresh` to intentionally recompute all
+answers, or override candidate count with `-SparseTopK 50`.
+
 ```bash
 python scripts/infer.py \
   --config configs/default.yaml \
@@ -396,17 +406,18 @@ Adjust the final submission serializer if the competition platform expects a dif
 
 ## 11. Answer formatting
 
-The final answer keeps one introductory sentence followed by one evidence item
-per line. Source line wrapping is collapsed into spaces, while legal list markers
-such as `1.`, `2)` and `a)` are removed:
+The final answer keeps one introductory sentence followed by bulleted evidence.
+Lines are joined with the Python newline character `"\n"`. Source line wrapping
+is collapsed into spaces, while legal list markers such as `1.`, `2)` and `a)`
+are replaced by one consistent `- ` prefix:
 
 ```text
 Đối với chủ đề được hỏi, các quy định liên quan như sau:
-Nội dung thứ nhất được trình bày trên một dòng hoàn chỉnh.
-Nội dung thứ hai.
+- Nội dung thứ nhất được trình bày trên một dòng hoàn chỉnh.
+- Nội dung thứ hai.
 ```
 
-No bullets or numbering are inserted before the evidence items.
+No numeric list markers are inserted before the evidence items.
 
 ---
 

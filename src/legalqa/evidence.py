@@ -18,7 +18,7 @@ def select_evidence(
     conn: sqlite3.Connection,
     reranked: list[tuple[int, float]],
     threshold: float,
-    max_nodes: int = 6,
+    max_nodes: int = 10,
 ) -> list[dict]:
     """Keep relevant fine-grained nodes, then restore original legal order."""
     if not reranked:

@@ -1,7 +1,7 @@
 from legalqa.generation import build_final_answer
 
 
-def test_final_answer_has_intro_and_plain_lines_without_mid_sentence_breaks_or_numbers():
+def test_final_answer_has_intro_and_bullets_without_mid_sentence_breaks_or_numbers():
     evidence = [
         {
             "raw_text": (
@@ -22,11 +22,11 @@ def test_final_answer_has_intro_and_plain_lines_without_mid_sentence_breaks_or_n
 
     assert answer == (
         "Đối với Câu hỏi, quy định liên quan như sau:\n"
-        "Tổ chức, hộ gia đình và cá nhân trên địa bàn là lực lượng tại chỗ "
+        "- Tổ chức, hộ gia đình và cá nhân trên địa bàn là lực lượng tại chỗ "
         "thực hiện hoạt động phòng, chống thiên tai.\n"
-        "Nguồn nhân lực bao gồm:\n"
-        "Dân quân tự vệ;\n"
-        "Quân đội nhân dân."
+        "- Nguồn nhân lực bao gồm:\n"
+        "- Dân quân tự vệ;\n"
+        "- Quân đội nhân dân."
     )
 
 
@@ -35,7 +35,7 @@ def test_final_answer_keeps_intro_and_ignores_empty_evidence():
 
     assert build_final_answer("Chủ đề là gì?", evidence) == (
         "Đối với Chủ đề, quy định liên quan như sau:\n"
-        "Nội dung hợp lệ."
+        "- Nội dung hợp lệ."
     )
 
 
