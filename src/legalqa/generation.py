@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 import torch
@@ -18,6 +19,19 @@ QUESTION_SUFFIXES = [
     "là gì",
     "ra sao",
 ]
+
+# Legal nodes often start with markers such as ``1.``, ``2)``, ``3.2`` or
+# ``a)``. Output paragraphs are separated by line breaks, so these markers are
+# removed instead of creating numbered or bulleted lists.
+LIST_MARKER_RE = re.compile(
+    r"^(?:"
+    r"\d+(?:\.\d+)*[.)]"
+    r"|\d+(?:\.\d+)+"
+    r"|[A-Za-zĐđ][.)]"
+    r"|[IVXLCDM]+[.)]"
+    r")\s+",
+    re.IGNORECASE,
+)
 
 INTRO_SYSTEM_PROMPT = """
 Bạn chỉ có nhiệm vụ viết MỘT câu mở đầu ngắn cho câu trả lời pháp luật tiếng Việt.
@@ -133,7 +147,31 @@ def build_final_answer(
     evidence: list[dict],
     intro_generator: Optional[HFIntroGenerator] = None,
 ) -> str:
-    if not evidence:
+    paragraphs: list[str] = []
+    for node in evidence:
+        current_parts: list[str] = []
+
+        def flush() -> None:
+            if current_parts:
+                paragraphs.append(" ".join(current_parts).strip())
+                current_parts.clear()
+
+        for raw_line in str(node.get("raw_text", "")).splitlines():
+            line = " ".join(raw_line.replace("\u00a0", " ").split())
+            if not line:
+                continue
+
+            marker = LIST_MARKER_RE.match(line)
+            if marker:
+                flush()
+                line = line[marker.end() :].strip()
+            if line:
+                current_parts.append(line)
+
+        flush()
+
+    paragraphs = [text for text in paragraphs if text]
+    if not paragraphs:
         return ""
 
     intro = (
@@ -141,8 +179,4 @@ def build_final_answer(
         if intro_generator is not None
         else deterministic_intro(question, evidence)
     )
-
-    # Critical boundary: evidence body is NEVER passed through the LLM.
-    evidence_texts = [str(node.get("raw_text", "")).strip() for node in evidence]
-    evidence_texts = [text for text in evidence_texts if text]
-    return intro + "\n" + "\n".join(evidence_texts)
+    return "\n".join([intro, *paragraphs])

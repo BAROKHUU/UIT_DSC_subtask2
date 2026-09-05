@@ -1,11 +1,12 @@
-# Vietnamese LegalQA — Hierarchical Sparse Retrieval
+# Vietnamese LegalQA — Hierarchical Hybrid Retrieval
 
 A competition-oriented pipeline for Vietnamese Legal Question Answering using:
 
 - **Approach A — Hierarchical metadata enrichment**
 - **Approach B — Multi-granularity parent/child retrieval**
-- **SQLite FTS5 BM25 sparse retrieval**
-- **Direct BM25 Top-K → Vietnamese reranker flow**
+- **Approach E — Hierarchy expansion / sibling rescue**
+- **SQLite FTS5 BM25 + Vietnamese dense embeddings**
+- **Reciprocal Rank Fusion (RRF)**
 - **Vietnamese reranker + threshold tuning**
 - **Strict separation between retrieval context and generation evidence**
 - **Optional GenAI for one short subject-aware intro sentence only**
@@ -31,20 +32,36 @@ Hierarchical Legal Tree
 retrieval_text                       raw_text
 (parent headings + own text)        (own legal evidence)
         |                               |
-        v                               |
-SQLite FTS5 BM25                       |
-        |                               |
-        v                               |
-Top-K sparse candidates                |
-        |                               |
-        v                               |
-Vietnamese Reranker                    |
-        |                               |
-        v                               |
-threshold tau -> Evidence Compaction <-+
-        |
-        v
-Original legal order -> optional intro -> final answer
+        |                               +-----------------------+
+        |                                                       |
+        v                                                       v
+SQLite FTS5 BM25                  GENERATION BOUNDARY       evidence body
+        |                                                       ^
+        |             +----------------+                        |
+        +------------>|      RRF       |                        |
+                      +-------+--------+                        |
+        +-------------------->|                                 |
+        |                     v                                 |
+        |                  Top-K                                |
+        |                     |                                 |
+        v                     v                                 |
+Vietnamese Dense       Hierarchy Expansion                      |
+Embedding + FAISS      parent / child / siblings                |
+                              |                                 |
+                              v                                 |
+                       Vietnamese Reranker                      |
+                              |                                 |
+                              v                                 |
+                         threshold tau                           |
+                              |                                 |
+                              v                                 |
+                       Evidence Compaction                       |
+                              |                                 |
+                              v                                 |
+                       Original legal order                     |
+                              |                                 |
+                              +----------> intro only ----------+
+                                           optional LLM
 ```
 
 ### Core rule
@@ -55,7 +72,7 @@ The project stores two distinct representations for every legal node:
 
 **Generation representation** is the node's original `raw_text` only.
 
-Therefore hierarchical metadata can improve sparse retrieval without leaking parent body text into the final legal evidence.
+Therefore hierarchy can improve retrieval without leaking parent body text into the final legal evidence.
 
 ---
 
@@ -77,9 +94,12 @@ legalqa-hierarchical-rag/
 ├── src/legalqa/
 │   ├── config.py
 │   ├── database.py
+│   ├── dense.py
 │   ├── evaluation.py
 │   ├── evidence.py
+│   ├── fusion.py
 │   ├── generation.py
+│   ├── hierarchy.py
 │   ├── io.py
 │   ├── parser.py
 │   ├── pipeline.py
@@ -110,7 +130,7 @@ data/
 
 `selected-contexts.zip` can also be extracted into a directory. Set the correct path in `configs/default.yaml`.
 
-The `.gitignore` excludes datasets, SQLite files, model caches and experiment outputs so they are not accidentally pushed to GitHub.
+The `.gitignore` excludes datasets, SQLite files, FAISS indexes, model caches and experiment outputs so they are not accidentally pushed to GitHub.
 
 ---
 
@@ -133,19 +153,9 @@ Check GPU:
 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
 
-The reranker automatically uses CUDA when `runtime.device: auto` and CUDA is available. BM25 runs in SQLite and does not use an embedding model or FAISS.
+The embedding model and reranker automatically use CUDA when `runtime.device: auto` and CUDA is available.
 
-The configured XLM-R reranker tokenizer requires `sentencepiece` and `protobuf`.
-They are included in `requirements.txt`; after dependency changes, run:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-When the reranker is already present in the Hugging Face cache, the runtime uses
-that local snapshot directly. This avoids an unnecessary Hub metadata request
-and is useful on Windows machines whose Python certificate store cannot verify
-the local network's HTTPS certificate chain.
+FAISS in `requirements.txt` uses `faiss-cpu`. This is sufficient for the exact `IndexFlatIP` baseline. Embedding generation and reranking are usually the heavier GPU workloads.
 
 ---
 
@@ -161,11 +171,12 @@ Set:
 
 ```yaml
 models:
+  embedding_model: YOUR_HUGGINGFACE_VIETNAMESE_EMBEDDING_MODEL
   reranker_model: YOUR_HUGGINGFACE_VIETNAMESE_RERANKER
   intro_llm_model: ""
 ```
 
-The reranker remains an experimental variable and can be changed independently of sparse retrieval.
+The project intentionally does **not** hard-code a model repository because the exact Vietnamese embedding/reranker should be treated as an experimental variable.
 
 ### Reranker compatibility
 
@@ -184,9 +195,8 @@ If your selected reranker has a custom `compute_score()` API, only adapt `Vietna
 The corpus mixes legal documents, decisions, technical standards and procedures. Inspect several parsed trees first:
 
 ```bash
-python scripts/inspect_parser.py \
-  --source data/selected-contexts.zip \
-  --limit 5
+cd scripts
+python .\inspect_parser.py --source ..\data\selected-contexts.zip --limit 3 --max-nodes 80
 ```
 
 The flexible parser detects structures such as:
@@ -216,7 +226,9 @@ Node IDs use source offsets rather than legal labels, so repeated `Điều 1` bl
 
 ---
 
-## 7. Build the SQLite BM25 index
+## 7. Build SQLite BM25 + FAISS
+
+After configuring the embedding model:
 
 ```bash
 python scripts/build_index.py --config configs/default.yaml
@@ -226,6 +238,7 @@ Outputs:
 
 ```text
 artifacts/legal_nodes.sqlite
+artifacts/legal_dense.faiss
 runs/default/index_stats.json
 ```
 
@@ -233,7 +246,7 @@ runs/default/index_stats.json
 
 All detected structural nodes are stored in `nodes` so parent/child relations remain available.
 
-Only retrieval-relevant node types are indexed in FTS5, including:
+Only retrieval-relevant node types are indexed in FTS/FAISS, including:
 
 ```text
 article
@@ -249,12 +262,12 @@ letter_item
 
 ## 8. Retrieval pipeline
 
-For each question, the runtime path is deliberately simple:
+For each question:
 
-### Step 1 — Sparse candidate filtering
+### Step 1 — Sparse
 
 ```text
-SQLite FTS5 BM25 -> Top-K
+SQLite FTS5 BM25 -> Top 100
 ```
 
 BM25 searches two fields:
@@ -264,9 +277,53 @@ context_text
 raw_text
 ```
 
-`context_text` contains legal ancestor headings, while `raw_text` contains the original node text. The FTS table searches both fields. No embedding model, dense index, RRF, or hierarchy expansion is executed.
+`context_text` contains legal ancestor headings, while `raw_text` contains the original node text.
 
-### Step 2 — Reranker
+### Step 2 — Dense
+
+```text
+Vietnamese embedding -> FAISS cosine/IP -> Top 100
+```
+
+Dense vectors are built from:
+
+```text
+retrieval_text = context_text + raw_text
+```
+
+### Step 3 — RRF
+
+Sparse and dense ranks are fused with Reciprocal Rank Fusion:
+
+```text
+score(c) = ws/(k + rank_sparse) + wd/(k + rank_dense)
+```
+
+Default:
+
+```yaml
+rrf_k: 60
+sparse_weight: 1.0
+dense_weight: 1.0
+fusion_top_k: 50
+```
+
+RRF is used instead of directly adding BM25 and cosine scores because the score scales are different.
+
+### Step 4 — Hierarchy expansion
+
+Strong Top-K seeds are expanded with:
+
+```text
+parent
+children
+siblings
+one additional upward sibling rescue
+```
+
+This is designed for cases where one provision contains the penalty while nearby provisions contain additional sanctions or remedies.
+
+### Step 5 — Reranker
 
 The reranker receives:
 
@@ -274,35 +331,19 @@ The reranker receives:
 (question, retrieval_text)
 ```
 
-and assigns relevance scores to exactly the BM25 candidate set. If BM25 returns fewer than Top-K matches, the reranker receives only those matches.
+and assigns relevance scores to the expanded candidate set.
 
-The candidate-set size is controlled in `configs/default.yaml`:
-
-```yaml
-retrieval:
-  sparse_top_k: 100
-```
-
-For example, set it to `50` to feed at most 50 candidates, or `200` to feed at most 200 candidates. This parameter affects retrieval recall and reranking time.
-
-Do not confuse it with:
-
-```yaml
-reranker:
-  batch_size: 32
-```
-
-`batch_size` only controls how many pairs are scored in one GPU/CPU mini-batch; it does not reduce the total candidate set.
-
-### Step 3 — Threshold
+### Step 6 — Threshold
 
 Only candidates above `tau` are retained, with a fallback to the highest-scoring candidate when no node passes the threshold.
 
-### Step 4 — Evidence compaction
+### Step 7 — Evidence compaction
 
 The system removes redundant parent/child evidence and attempts to select the **smallest sufficient legal unit**.
 
-If multiple relevant Points under the same Clause are selected and the parent Clause is also sufficiently relevant, the system can promote them to the Clause to avoid fragmented evidence.
+If a parent and its relevant child nodes both pass the threshold, only the
+fine-grained child nodes are retained. Relevant children are never promoted back
+to the broader parent because the parent's text may contain unrelated children.
 
 Finally, evidence is sorted by original source offsets rather than reranker score.
 
@@ -324,15 +365,6 @@ python scripts/infer.py \
   --config configs/default.yaml \
   --question "..." \
   --threshold 0.60
-```
-
-Override the BM25/reranker candidate-set size temporarily, without editing YAML:
-
-```bash
-python scripts/infer.py \
-  --config configs/default.yaml \
-  --question "..." \
-  --sparse-top-k 50
 ```
 
 ---
@@ -362,47 +394,19 @@ Adjust the final submission serializer if the competition platform expects a dif
 
 ---
 
-## 11. Controlled answer generation
+## 11. Answer formatting
 
-Default configuration:
-
-```yaml
-answer:
-  use_llm_intro: false
-```
-
-This uses a deterministic subject-aware intro such as:
+The final answer keeps one introductory sentence followed by one evidence item
+per line. Source line wrapping is collapsed into spaces, while legal list markers
+such as `1.`, `2)` and `a)` are removed:
 
 ```text
-Đối với nguồn nhân lực cho công tác phòng chống thiên tai,
-các quy định liên quan tại Điều 6 như sau:
+Đối với chủ đề được hỏi, các quy định liên quan như sau:
+Nội dung thứ nhất được trình bày trên một dòng hoàn chỉnh.
+Nội dung thứ hai.
 ```
 
-Then the program appends retrieved `raw_text` verbatim.
-
-### Optional GenAI intro
-
-Configure:
-
-```yaml
-models:
-  intro_llm_model: YOUR_GENERATIVE_MODEL
-
-answer:
-  use_llm_intro: true
-```
-
-The LLM receives only:
-
-- the question;
-- a derived subject hint;
-- the selected legal paths.
-
-It is instructed to produce exactly one intro sentence and not to create legal content.
-
-**The evidence body never passes through the LLM.**
-
-This boundary is intentional for METEOR/ROUGE-oriented competition evaluation and hallucination control.
+No bullets or numbering are inserted before the evidence items.
 
 ---
 
@@ -433,7 +437,7 @@ The script caches reranker outputs once:
 runs/default/rerank_cache.json
 ```
 
-Therefore threshold sweeps do not need to rerun sparse retrieval and reranking every time. Cache metadata includes `sparse_top_k` and the reranker settings, so an incompatible cache is ignored automatically.
+Therefore threshold sweeps do not need to rerun dense retrieval and reranking every time.
 
 Results:
 
@@ -447,19 +451,19 @@ The included METEOR implementation is an **approximate local proxy** based on to
 
 ---
 
-## 13. Recommended candidate-set experiment
+## 13. Recommended first experiments
 
-Try the same validation subset with values such as `25, 50, 100, 200`. Larger values can improve BM25 recall, but reranking becomes slower roughly in proportion to the number of candidates. Choose the smallest value that preserves validation quality.
+Run these before adding more complexity:
 
-Example:
+| Run | Retrieval | Hierarchy expansion | Intro |
+|---|---|---|---|
+| R1 | A + B | No | deterministic |
+| R2 | A + B | **Yes (E)** | deterministic |
+| R3 | A + B | **Yes (E)** | GenAI intro only |
 
-```bash
-python scripts/tune_threshold.py \
-  --config configs/default.yaml \
-  --limit 100 \
-  --sparse-top-k 50 \
-  --cache runs/default/rerank_cache_k50.json
-```
+The key comparison is **R2 vs R1**. If R2 improves validation METEOR/ROUGE, sibling rescue is providing useful evidence recall.
+
+Then compare **R3 vs R2** to determine whether GenAI improves metric score or merely makes the response more readable.
 
 ---
 
@@ -470,23 +474,33 @@ Start with:
 ```yaml
 retrieval:
   sparse_top_k: 100
+  dense_top_k: 100
+  rrf_k: 60
+  sparse_weight: 1.0
+  dense_weight: 1.0
+  fusion_top_k: 50
+
+hierarchy:
+  expansion_seed_k: 20
+  max_neighbors_per_seed: 24
+  max_expanded: 150
 
 reranker:
-  batch_size: 32
   threshold: 0.55
 
 answer:
   max_evidence_nodes: 6
-  parent_rescue_margin: 0.05
 ```
 
 Tune in roughly this order:
 
-1. `retrieval.sparse_top_k` (candidate recall versus reranking cost);
-2. reranker threshold;
-3. max evidence nodes;
-4. BM25 field weights/token normalization;
-5. reranker model.
+1. reranker threshold;
+2. fusion Top-K;
+3. hierarchy expansion size/depth;
+4. max evidence nodes;
+5. sparse/dense RRF weights;
+6. embedding model;
+7. reranker model.
 
 ---
 
@@ -497,7 +511,9 @@ Every inference can write a JSONL record containing:
 ```text
 question
 sparse_top
-reranker_candidate_count
+dense_top
+fused_top
+expanded_count
 reranked_top
 threshold
 selected evidence
@@ -517,7 +533,9 @@ This makes it possible to determine whether a failure came from:
 
 ```text
 parser
--> sparse recall
+-> sparse/dense recall
+-> RRF
+-> hierarchy expansion
 -> reranker
 -> threshold
 -> evidence compaction
@@ -534,7 +552,7 @@ rather than treating the system as one opaque RAG pipeline.
 pytest -q
 ```
 
-Current tests verify parsing behavior and that sparse Top-K results are passed directly to the reranker.
+Current tests verify basic Article/Clause/Point parsing and unique IDs when an Article number restarts inside one passage.
 
 ---
 
@@ -570,9 +588,13 @@ Because parent text is useful for retrieval but may pollute the final output. Th
 
 Article-level chunks provide context; Clause/Point chunks provide precision. Searching both reduces the trade-off between context and specificity.
 
-### Why feed BM25 results directly to the reranker?
+### Why expansion before reranking?
 
-It keeps the first stage fast and transparent: one Top-K parameter defines the complete reranker workload, with no dense-model memory cost or fusion/expansion changing the candidate count.
+A relevant sibling may rank outside initial Top-50. Expanding strong legal neighborhoods first gives the reranker a chance to rescue it.
+
+### Why RRF?
+
+BM25 and cosine scores are not directly comparable. Rank fusion avoids score-scale calibration in the initial baseline.
 
 ### Why deterministic intro by default?
 
@@ -586,7 +608,8 @@ After the baseline is stable, useful experiments include:
 
 - domain-specific Vietnamese text normalization for BM25;
 - query expansion using legal synonyms without altering the answer;
-- BM25F-style field weighting experiments for context versus raw text;
+- separate dense vectors for raw text vs hierarchy context;
+- learned sparse/dense fusion;
 - document-aware reranker batching;
 - better rule-based structural parsing for specific document families;
 - answer-style calibration using train data without using train answers as legal evidence;

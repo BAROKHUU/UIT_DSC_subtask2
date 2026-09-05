@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Optional
 
 from .evidence import select_evidence
-from .generation import HFIntroGenerator, build_final_answer
+from .generation import build_final_answer
 from .reranker import VietnameseReranker, rerank_candidates
 from .sparse import sparse_search
 from .utils import choose_device
@@ -27,18 +26,6 @@ class LegalQAPipeline:
             max_length=int(cfg["reranker"]["max_length"]),
             trust_remote_code=trust_remote_code,
         )
-
-        self.intro_generator: Optional[HFIntroGenerator] = None
-        use_llm_intro = bool(cfg.get("answer", {}).get("use_llm_intro", False))
-        intro_model = str(cfg.get("models", {}).get("intro_llm_model", "")).strip()
-        if use_llm_intro:
-            if not intro_model:
-                raise ValueError("answer.use_llm_intro=true but models.intro_llm_model is empty")
-            self.intro_generator = HFIntroGenerator(
-                intro_model,
-                max_new_tokens=int(cfg["answer"].get("max_intro_new_tokens", 64)),
-                trust_remote_code=trust_remote_code,
-            )
 
     def close(self) -> None:
         self.conn.close()
@@ -76,7 +63,6 @@ class LegalQAPipeline:
         question: str,
         reranked: list[tuple[int, float]],
         threshold: float | None = None,
-        use_configured_intro: bool = True,
     ) -> tuple[str, list[dict]]:
         threshold = (
             float(self.cfg["reranker"]["threshold"])
@@ -88,10 +74,8 @@ class LegalQAPipeline:
             reranked,
             threshold=threshold,
             max_nodes=int(self.cfg["answer"]["max_evidence_nodes"]),
-            parent_margin=float(self.cfg["answer"]["parent_rescue_margin"]),
         )
-        intro_generator = self.intro_generator if use_configured_intro else None
-        answer = build_final_answer(question, evidence, intro_generator=intro_generator)
+        answer = build_final_answer(question, evidence)
         return answer, evidence
 
     def answer(self, question: str, threshold: float | None = None) -> tuple[str, dict]:
@@ -100,7 +84,6 @@ class LegalQAPipeline:
             question,
             stages["reranked"],
             threshold=threshold,
-            use_configured_intro=True,
         )
         debug = {
             "question": question,
@@ -113,6 +96,8 @@ class LegalQAPipeline:
                     "row_id": int(node["row_id"]),
                     "document_id": str(node["document_id"]),
                     "source_name": node.get("source_name", ""),
+                    "node_type": node.get("node_type", ""),
+                    "parent_id": node.get("parent_id"),
                     "legal_path": node.get("legal_path", ""),
                     "score": float(node["rerank_score"]),
                     "text": node.get("raw_text", ""),

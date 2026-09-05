@@ -9,8 +9,6 @@ paths:
 models:
   # Replace this with the exact Hugging Face reranker you want to use.
   reranker_model: AITeamVN/Vietnamese_Reranker
-  # Optional. Leave empty to use deterministic intro generation.
-  intro_llm_model: ""
   trust_remote_code: true
 
 retrieval:
@@ -25,10 +23,8 @@ reranker:
   threshold: 0.55
 
 answer:
+  # Maximum number of independently relevant child/leaf evidence nodes shown.
   max_evidence_nodes: 6
-  parent_rescue_margin: 0.05
-  use_llm_intro: false
-  max_intro_new_tokens: 64
 
 runtime:
   device: auto

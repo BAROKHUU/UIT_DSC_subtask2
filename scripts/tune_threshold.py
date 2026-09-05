@@ -114,7 +114,6 @@ def main() -> None:
                     str(item["question"]),
                     reranked,
                     threshold=tau,
-                    use_configured_intro=False,  # deterministic during tuning
                 )
                 gold = str(item["answer"])
                 meteor_scores.append(approximate_meteor(gold, prediction))

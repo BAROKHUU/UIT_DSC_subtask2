@@ -35,6 +35,17 @@ def main() -> None:
     parser.add_argument("--debug-jsonl", default=None)
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume batch inference from an existing output JSON file",
+    )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help="Save batch predictions after every N new answers (0 disables checkpoints)",
+    )
+    parser.add_argument(
         "--sparse-top-k",
         type=int,
         default=None,
@@ -44,6 +55,8 @@ def main() -> None:
 
     if not args.question and not args.input:
         parser.error("Provide --question or --input")
+    if args.checkpoint_every < 0:
+        parser.error("--checkpoint-every must be at least 0")
 
     project_root = Path(__file__).resolve().parents[1]
     cfg = load_config(project_root / args.config)
@@ -68,17 +81,41 @@ def main() -> None:
         input_path = project_root / args.input
         data = load_json(input_path)
         questions = normalize_questions(data)
-        predictions = {}
+        output_path = project_root / (args.output or "runs/default/predictions.json")
+        predictions: dict = {}
+        if args.resume and output_path.exists():
+            existing = load_json(output_path)
+            if not isinstance(existing, dict):
+                raise ValueError(f"Cannot resume: {output_path} is not a JSON object")
+            predictions.update(existing)
+
+        pending_questions = [item for item in questions if item[0] not in predictions]
+        if predictions:
+            print(
+                f"Resuming with {len(predictions)} completed; "
+                f"{len(pending_questions)} questions remaining."
+            )
 
         debug_path = project_root / args.debug_jsonl if args.debug_jsonl else None
-        for qid, question in tqdm(questions, desc="Inference"):
-            answer, debug = pipeline.answer(question, threshold=args.threshold)
-            predictions[qid] = {"question": question, "answer": answer}
-            if debug_path:
-                debug["id"] = qid
-                append_jsonl(debug_path, debug)
+        completed_since_start = 0
+        try:
+            for qid, question in tqdm(pending_questions, desc="Inference"):
+                answer, debug = pipeline.answer(question, threshold=args.threshold)
+                predictions[qid] = {"question": question, "answer": answer}
+                completed_since_start += 1
+                if debug_path:
+                    debug["id"] = qid
+                    append_jsonl(debug_path, debug)
+                if (
+                    args.checkpoint_every > 0
+                    and completed_since_start % args.checkpoint_every == 0
+                ):
+                    save_json(output_path, predictions)
+        except KeyboardInterrupt:
+            save_json(output_path, predictions)
+            print(f"Interrupted; saved {len(predictions)} predictions to {output_path}")
+            raise
 
-        output_path = project_root / (args.output or "runs/default/predictions.json")
         save_json(output_path, predictions)
         print(f"Saved {len(predictions)} predictions to {output_path}")
     finally:
