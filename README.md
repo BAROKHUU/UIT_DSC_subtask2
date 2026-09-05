@@ -627,3 +627,5 @@ After the baseline is stable, useful experiments include:
 - official METEOR scorer integration if released.
 
 Keep these as separate experiments so the effect of hierarchical retrieval remains measurable.
+
+## 20. Result in codabench 0.4016
