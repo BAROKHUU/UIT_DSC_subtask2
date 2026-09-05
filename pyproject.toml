@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legalqa-hierarchical-rag"
+version = "0.1.0"
+description = "Hierarchical sparse retrieval and reranking pipeline for Vietnamese LegalQA"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]

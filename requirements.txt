@@ -1,0 +1,18 @@
+numpy>=1.26,<3
+pandas>=2.2,<3
+tqdm>=4.66,<5
+PyYAML>=6.0,<7
+
+# Sparse retrieval uses Python's built-in sqlite3 module with FTS5.
+
+# Reranker / optional local generator
+torch>=2.2
+transformers>=4.44,<5
+accelerate>=0.33,<2
+sentencepiece>=0.2,<1
+protobuf>=5,<7
+
+# Evaluation helpers
+nltk>=3.9,<4
+rouge-score>=0.1.2,<1
+pytest>=8.0,<9

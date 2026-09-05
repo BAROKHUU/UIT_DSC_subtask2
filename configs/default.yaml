@@ -1,0 +1,35 @@
+paths:
+  # Can be a selected-contexts.zip file or an extracted directory.
+  context_source: data/selected-contexts.zip
+  db_path: artifacts/legal_nodes.sqlite
+  train_path: data/train.json
+  public_path: data/public-official.json
+  run_dir: runs/default
+
+models:
+  # Replace this with the exact Hugging Face reranker you want to use.
+  reranker_model: AITeamVN/Vietnamese_Reranker
+  # Optional. Leave empty to use deterministic intro generation.
+  intro_llm_model: ""
+  trust_remote_code: true
+
+retrieval:
+  # BM25 returns at most this many candidates and feeds them DIRECTLY to the
+  # reranker. Change this value to control the reranker candidate-set size.
+  sparse_top_k: 100
+
+reranker:
+  # Mini-batch size used while scoring; this does NOT limit total candidates.
+  batch_size: 32
+  max_length: 512
+  threshold: 0.55
+
+answer:
+  max_evidence_nodes: 6
+  parent_rescue_margin: 0.05
+  use_llm_intro: false
+  max_intro_new_tokens: 64
+
+runtime:
+  device: auto
+  seed: 42

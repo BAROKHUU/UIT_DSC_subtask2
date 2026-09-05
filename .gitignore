@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.env
+
+# Data - do not commit competition datasets
+/data/*
+!/data/.gitkeep
+*.zip
+*.sqlite
+*.sqlite3
+*.db
+*.index
+
+# Models / caches
+models/
+cache/
+.huggingface/
+
+# Runs / outputs
+/runs/*
+!/runs/.gitkeep
+outputs/
+logs/
+*.jsonl
+
+# Notebooks
+.ipynb_checkpoints/
