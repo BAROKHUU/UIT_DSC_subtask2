@@ -73,6 +73,7 @@ class LegalQAPipeline:
             self.conn,
             reranked,
             threshold=threshold,
+            question=question,
             max_nodes=int(self.cfg["answer"]["max_evidence_nodes"]),
         )
         answer = build_final_answer(question, evidence)

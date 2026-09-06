@@ -14,17 +14,17 @@ models:
 retrieval:
   # BM25 returns at most this many candidates and feeds them DIRECTLY to the
   # reranker. Change this value to control the reranker candidate-set size.
-  sparse_top_k: 50
+  sparse_top_k: 80
 
 reranker:
   # Mini-batch size used while scoring; this does NOT limit total candidates.
-  batch_size: 32
-  max_length: 512
-  threshold: 0.65
+  batch_size: 16
+  max_length: 1024
+  threshold: 0.55
 #old threshold 0.55 
 answer:
   # Maximum number of independently relevant child/leaf evidence nodes shown.
-  max_evidence_nodes: 6
+  max_evidence_nodes: 8
 
 runtime:
   device: auto
