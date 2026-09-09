@@ -5,7 +5,10 @@ PyYAML>=6.0,<7
 
 # Sparse retrieval uses Python's built-in sqlite3 module with FTS5.
 
-# Reranker / optional local generator
+# Semantic dense retrieval (CPU FAISS search; embedding inference uses PyTorch)
+faiss-cpu>=1.8,<2
+
+# Embedding model / reranker / optional local generator
 torch>=2.2
 transformers>=4.44,<5
 accelerate>=0.33,<2

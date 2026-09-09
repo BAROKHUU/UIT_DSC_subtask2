@@ -3,6 +3,15 @@ param(
     [ValidateRange(1, 10000)]
     [int]$SparseTopK = 100,
 
+    [ValidateRange(1, 10000)]
+    [int]$DenseTopK = 100,
+
+    [ValidateRange(1, 10000)]
+    [int]$FusionTopK = 120,
+
+    [ValidateRange(1, 10000)]
+    [int]$RerankerCandidates = 180,
+
     [ValidateRange(1, 1000)]
     [int]$CheckpointEvery = 10,
 
@@ -37,6 +46,9 @@ $inferArgs = @(
     "--input", "data\public-official.json",
     "--output", "data\submission.json",
     "--sparse-top-k", $SparseTopK,
+    "--dense-top-k", $DenseTopK,
+    "--fusion-top-k", $FusionTopK,
+    "--reranker-candidates", $RerankerCandidates,
     "--checkpoint-every", $CheckpointEvery
 )
 if (-not $Fresh) {
@@ -45,7 +57,7 @@ if (-not $Fresh) {
 
 Push-Location $projectRoot
 try {
-    Write-Host "Creating data\submission.json (Top-K=$SparseTopK, checkpoint every $CheckpointEvery answers)..."
+    Write-Host "Creating data\submission.json (sparse=$SparseTopK, dense=$DenseTopK, RRF=$FusionTopK, reranker<=$RerankerCandidates)..."
     & $pythonPath @inferArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Inference failed with exit code $LASTEXITCODE"

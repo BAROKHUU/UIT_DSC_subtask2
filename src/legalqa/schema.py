@@ -21,4 +21,6 @@ class LegalNode:
     context_text: str = ""
     retrieval_text: str = ""
     legal_path: str = ""
-    is_indexable: bool = False
+    # This flag controls only SQLite FTS5/BM25 membership. Dense membership is
+    # derived separately when the semantic-leaf FAISS index is built.
+    is_sparse_indexable: bool = False

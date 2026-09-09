@@ -12,6 +12,9 @@ from .parser import parse_document
 from .schema import LegalNode
 
 
+SPARSE_HEADER_ONLY_TYPES = {'part', 'chapter', 'section'}
+
+
 def create_database(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,15 +44,31 @@ def create_database(db_path: str | Path) -> sqlite3.Connection:
             context_text TEXT,
             raw_text TEXT,
             retrieval_text TEXT,
-            is_indexable INTEGER NOT NULL DEFAULT 0
+            is_sparse_indexable INTEGER NOT NULL DEFAULT 0
         )
         """
     )
     conn.execute("CREATE INDEX idx_nodes_parent ON nodes(parent_id)")
     conn.execute("CREATE INDEX idx_nodes_document_offsets ON nodes(document_id, start_offset)")
-    conn.execute("CREATE INDEX idx_nodes_indexable ON nodes(is_indexable)")
+    conn.execute("CREATE INDEX idx_nodes_sparse_indexable ON nodes(is_sparse_indexable)")
 
-    # rowid is intentionally aligned with nodes.row_id for indexable nodes.
+    # Dense vectors live in FAISS. This compact table is only the mapping from
+    # each FAISS position to either one structural node or a short-point bundle.
+    conn.execute(
+        """
+        CREATE TABLE dense_units (
+            dense_id INTEGER PRIMARY KEY,
+            unit_type TEXT NOT NULL,
+            node_id TEXT,
+            parent_id TEXT,
+            member_node_ids TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_dense_units_node ON dense_units(node_id)")
+    conn.execute("CREATE INDEX idx_dense_units_parent ON dense_units(parent_id)")
+
+    # rowid is intentionally aligned with nodes.row_id for sparse-indexable nodes.
     conn.execute(
         """
         CREATE VIRTUAL TABLE node_fts USING fts5(
@@ -70,7 +89,7 @@ def _insert_node(conn: sqlite3.Connection, node: LegalNode) -> int:
             node_id, document_id, source_name, node_type, label, depth,
             parent_id, start_offset, end_offset, order_index,
             header_text, legal_path, context_text, raw_text,
-            retrieval_text, is_indexable
+            retrieval_text, is_sparse_indexable
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
@@ -89,15 +108,21 @@ def _insert_node(conn: sqlite3.Connection, node: LegalNode) -> int:
             node.context_text,
             node.raw_text,
             node.retrieval_text,
-            int(node.is_indexable),
+            int(node.is_sparse_indexable),
         ),
     )
     row_id = int(cursor.lastrowid)
 
-    if node.is_indexable:
+    if node.is_sparse_indexable:
+        # Broad structural containers remain searchable by BM25, but indexing
+        # their complete raw_text would duplicate every descendant body. The
+        # detailed content is already indexed on Article/Clause/Point nodes.
+        sparse_raw_text = (
+            node.header_text if node.node_type in SPARSE_HEADER_ONLY_TYPES else node.raw_text
+        )
         conn.execute(
             "INSERT INTO node_fts(rowid, context_text, raw_text) VALUES (?, ?, ?)",
-            (row_id, node.context_text, node.raw_text),
+            (row_id, node.context_text, sparse_raw_text),
         )
     return row_id
 
@@ -118,7 +143,7 @@ def build_corpus_database(source_path: str | Path, db_path: str | Path) -> dict:
             for node in nodes:
                 _insert_node(conn, node)
                 total_nodes += 1
-                total_indexable += int(node.is_indexable)
+                total_indexable += int(node.is_sparse_indexable)
 
             total_documents += 1
             if total_documents % 100 == 0:
@@ -131,7 +156,7 @@ def build_corpus_database(source_path: str | Path, db_path: str | Path) -> dict:
     return {
         "documents": total_documents,
         "nodes": total_nodes,
-        "indexable_nodes": total_indexable,
+        "sparse_indexable_nodes": total_indexable,
         "db_path": str(db_path),
     }
 
@@ -162,13 +187,13 @@ def row_id_from_node_id(conn: sqlite3.Connection, node_id: str | None) -> int | 
 def get_children_row_ids(
     conn: sqlite3.Connection,
     node_id: str,
-    indexable_only: bool = True,
+    sparse_indexable_only: bool = True,
 ) -> list[int]:
-    if indexable_only:
+    if sparse_indexable_only:
         rows = conn.execute(
             """
             SELECT row_id FROM nodes
-            WHERE parent_id = ? AND is_indexable = 1
+            WHERE parent_id = ? AND is_sparse_indexable = 1
             ORDER BY start_offset
             """,
             (node_id,),

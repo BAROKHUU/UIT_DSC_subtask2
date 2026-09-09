@@ -41,8 +41,11 @@ def main() -> None:
         "--sparse-top-k",
         type=int,
         default=None,
-        help="Temporarily override the number of BM25 candidates fed to the reranker",
+        help='Temporarily override the BM25 result count before RRF',
     )
+    parser.add_argument('--dense-top-k', type=int, default=None)
+    parser.add_argument('--fusion-top-k', type=int, default=None)
+    parser.add_argument('--reranker-candidates', type=int, default=None)
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
@@ -51,11 +54,25 @@ def main() -> None:
         if args.sparse_top_k < 1:
             parser.error("--sparse-top-k must be at least 1")
         cfg["retrieval"]["sparse_top_k"] = args.sparse_top_k
+    for arg_name, config_name in (
+        ('dense_top_k', 'dense_top_k'),
+        ('fusion_top_k', 'fusion_top_k'),
+    ):
+        value = getattr(args, arg_name)
+        if value is not None:
+            if value < 1:
+                parser.error(f'--{arg_name.replace("_", "-")} must be at least 1')
+            cfg['retrieval'][config_name] = value
+    if args.reranker_candidates is not None:
+        if args.reranker_candidates < 1:
+            parser.error('--reranker-candidates must be at least 1')
+        cfg.setdefault('hierarchy', {})['max_candidates'] = args.reranker_candidates
     seed = int(cfg["runtime"]["seed"])
     set_seed(seed)
 
     train_path = resolve_path(project_root, cfg["paths"]["train_path"])
     db_path = resolve_path(project_root, cfg["paths"]["db_path"])
+    dense_index_path = resolve_path(project_root, cfg['paths'].get('dense_index_path'))
     assert train_path and db_path
 
     rows = normalize_train(load_json(train_path))
@@ -70,10 +87,13 @@ def main() -> None:
         val_rows = val_rows[: args.limit]
 
     cache_path = project_root / args.cache
-    pipeline = LegalQAPipeline(cfg, db_path)
+    pipeline = LegalQAPipeline(cfg, db_path, dense_index_path=dense_index_path)
     try:
         cache_metadata = {
-            "sparse_top_k": int(cfg["retrieval"]["sparse_top_k"]),
+            'retrieval': cfg['retrieval'],
+            'dense': cfg.get('dense', {}),
+            'hierarchy': cfg.get('hierarchy', {}),
+            'embedding_model': str(cfg['models']['embedding_model']),
             "reranker_model": str(cfg["models"]["reranker_model"]),
             "reranker_max_length": int(cfg["reranker"]["max_length"]),
         }

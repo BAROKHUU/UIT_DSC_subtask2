@@ -19,7 +19,10 @@ ROMAN_SECTION_RE = re.compile(r"^([IVXLCDM]{1,8})[.)]\s+\S")
 NUMBERED_ITEM_RE = re.compile(r"^(\d+)[.)]\s+\S")
 LETTER_ITEM_RE = re.compile(r"^([a-zđ])[.)]\s+\S", re.IGNORECASE)
 
-INDEXABLE_TYPES = {
+SPARSE_INDEXABLE_TYPES = {
+    "part",
+    "chapter",
+    "section",
     "article",
     "clause",
     "point",
@@ -151,7 +154,7 @@ def _make_document_fallback(document_id: str, source_name: str, text: str) -> Li
         context_text=f"Văn bản: {re.sub(r'[-_]+', ' ', source_name)}",
         retrieval_text=f"Văn bản: {re.sub(r'[-_]+', ' ', source_name)}\n\nNội dung:\n{raw}",
         legal_path=source_name,
-        is_indexable=True,
+        is_sparse_indexable=True,
     )
     return [node]
 
@@ -274,6 +277,6 @@ def parse_document(document_id: str, source_name: str, passage: str) -> List[Leg
         node.context_text = "\n".join(context_parts)
         node.retrieval_text = node.context_text + "\n\nNội dung:\n" + node.raw_text
         node.legal_path = build_legal_path(node, node_by_id)
-        node.is_indexable = node.node_type in INDEXABLE_TYPES
+        node.is_sparse_indexable = node.node_type in SPARSE_INDEXABLE_TYPES
 
     return nodes

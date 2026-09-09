@@ -49,8 +49,17 @@ def main() -> None:
         "--sparse-top-k",
         type=int,
         default=None,
-        help="Temporarily override the number of BM25 candidates fed to the reranker",
+        help='Temporarily override the BM25 result count before RRF',
     )
+    parser.add_argument('--dense-top-k', type=int, default=None, help='Override FAISS Top-K before bundle expansion and RRF')
+    parser.add_argument('--fusion-top-k', type=int, default=None, help='Override the number of RRF seeds')
+    parser.add_argument(
+        '--reranker-candidates',
+        type=int,
+        default=None,
+        help='Override hierarchy.max_candidates (hard upper bound sent to reranker)',
+    )
+    parser.add_argument('--disable-dense', action='store_true', help='Run BM25-only without loading FAISS/embedding model')
     args = parser.parse_args()
 
     if not args.question and not args.input:
@@ -64,12 +73,27 @@ def main() -> None:
         if args.sparse_top_k < 1:
             parser.error("--sparse-top-k must be at least 1")
         cfg["retrieval"]["sparse_top_k"] = args.sparse_top_k
+    if args.dense_top_k is not None:
+        if args.dense_top_k < 1:
+            parser.error('--dense-top-k must be at least 1')
+        cfg['retrieval']['dense_top_k'] = args.dense_top_k
+    if args.fusion_top_k is not None:
+        if args.fusion_top_k < 1:
+            parser.error('--fusion-top-k must be at least 1')
+        cfg['retrieval']['fusion_top_k'] = args.fusion_top_k
+    if args.reranker_candidates is not None:
+        if args.reranker_candidates < 1:
+            parser.error('--reranker-candidates must be at least 1')
+        cfg.setdefault('hierarchy', {})['max_candidates'] = args.reranker_candidates
+    if args.disable_dense:
+        cfg.setdefault('dense', {})['enabled'] = False
     set_seed(int(cfg["runtime"]["seed"]))
 
     db_path = resolve_path(project_root, cfg["paths"]["db_path"])
+    dense_index_path = resolve_path(project_root, cfg['paths'].get('dense_index_path'))
     assert db_path
 
-    pipeline = LegalQAPipeline(cfg, db_path)
+    pipeline = LegalQAPipeline(cfg, db_path, dense_index_path=dense_index_path)
     try:
         if args.question:
             answer, debug = pipeline.answer(args.question, threshold=args.threshold)
