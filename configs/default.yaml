@@ -2,19 +2,63 @@ paths:
   # Can be a selected-contexts.zip file or an extracted directory.
   context_source: data/selected-contexts.zip
   db_path: artifacts/legal_nodes.sqlite
+  dense_index_path: artifacts/legal_semantic_leaf.faiss
   train_path: data/train.json
   public_path: data/public-official.json
   run_dir: runs/default
 
 models:
-  # Replace this with the exact Hugging Face reranker you want to use.
   reranker_model: AITeamVN/Vietnamese_Reranker
+  embedding_model: Qwen/Qwen3-Embedding-0.6B
   trust_remote_code: true
 
 retrieval:
-  # BM25 returns at most this many candidates and feeds them DIRECTLY to the
-  # reranker. Change this value to control the reranker candidate-set size.
-  sparse_top_k: 80
+  # Independent first-stage cutoffs. Dense bundles are expanded to real Point
+  # nodes before RRF; raw BM25/cosine scores are never added to each other.
+  sparse_top_k: 100
+  dense_top_k: 100
+  fusion_top_k: 120
+  rrf_k: 60
+  sparse_weight: 1.0
+  dense_weight: 1.0
+  bm25_context_weight: 1.8
+  bm25_raw_weight: 1.0
+
+dense:
+  enabled: true
+  device: auto
+  # A Point of exactly this length or longer gets its own vector. Shorter
+  # sibling Points are represented by one point_bundle vector.
+  point_min_chars: 180
+  batch_size: 16
+  max_length: 512
+  pooling: last_token
+  # auto = float16 on CUDA, float32 on CPU.
+  dtype: auto
+  normalize: true
+  query_instruction: >-
+    Given a Vietnamese legal question, retrieve the most relevant legal provision.
+
+hierarchy:
+  enabled: true
+  # Only the highest RRF seeds are expanded. max_candidates is the hard upper
+  # bound on how many real SQLite nodes can be sent to the reranker.
+  seed_top_k: 30
+  max_candidates: 180
+  include_parent: true
+  parent_hops: 1
+  include_children: true
+  max_children_per_seed: 20
+  include_siblings: true
+  max_siblings_per_seed: 12
+  rerankable_types:
+    - article
+    - clause
+    - point
+    - numeric_section
+    - roman_section
+    - numbered_item
+    - letter_item
 
 reranker:
   # Mini-batch size used while scoring; this does NOT limit total candidates.

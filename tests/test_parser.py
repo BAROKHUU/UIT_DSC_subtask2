@@ -13,6 +13,8 @@ def test_basic_legal_hierarchy():
     assert "Điều 1" in point.context_text
     assert point.raw_text.startswith("a)")
     assert point.legal_path == "điểm a khoản 1 Điều 1"
+    chapter = next(n for n in nodes if n.node_type == "chapter")
+    assert chapter.is_sparse_indexable
 
 
 def test_repeated_article_number_has_unique_node_id():

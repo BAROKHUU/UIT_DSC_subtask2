@@ -26,7 +26,10 @@ def main() -> None:
         for node in nodes[: args.max_nodes]:
             indent = "  " * max(0, node.depth // 10 - 1)
             preview = " ".join(node.header_text.split())[:120]
-            print(f"{indent}- {node.node_type:<16} label={node.label:<8} index={int(node.is_indexable)} | {preview}")
+            print(
+                f"{indent}- {node.node_type:<16} label={node.label:<8} "
+                f"sparse={int(node.is_sparse_indexable)} | {preview}"
+            )
 
 
 if __name__ == "__main__":

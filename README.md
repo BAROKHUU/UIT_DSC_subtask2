@@ -628,11 +628,9 @@ After the baseline is stable, useful experiments include:
 
 Keep these as separate experiments so the effect of hierarchical retrieval remains measurable.
 
-<<<<<<< HEAD
-## 20. Result in codabench 0.4016
-=======
 
-## 20. Inference public-official
+
+## 20. Inference public-official 0.4324
 ```bash
 python infer.py --config configs/default.yaml --input data/public-official.json --output data/submission.json --resume --checkpoint-every 10
 ```
